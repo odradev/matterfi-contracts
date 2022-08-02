@@ -1,7 +1,13 @@
-use odra::{Mapping, types::Address, Variable, execution_error, ContractEnv};
+use odra::{Mapping, types::{event::Event, Address}, Variable, execution_error, ContractEnv, Event};
 
 type PaymentCode = [u8; 32];
 type PaymentSignal = [u8; 32];
+
+execution_error! {
+    pub enum Error {
+        NameAlreadyExists => 1
+    }
+}
 
 #[odra::module]
 pub struct MasterPaymentCode {
@@ -17,6 +23,10 @@ impl MasterPaymentCode {
         }
         self.by_name.set(&key, contract_address);
         self.by_code.set(&code, contract_address);
+
+        MasterPaymentCodeSet {
+            key, contract_address, code
+        }.emit();
     }
 
     pub fn get_address_from_name(&self, key: String) -> Option<Address> {
@@ -28,10 +38,11 @@ impl MasterPaymentCode {
     }
 }
 
-execution_error! {
-    pub enum Error {
-        NameAlreadyExists => 1
-    }
+#[derive(Event, PartialEq, Eq, Debug)]
+pub struct MasterPaymentCodeSet {
+    pub key: String,
+    pub contract_address: Address,
+    pub code: PaymentCode
 }
 
 #[odra::module]
@@ -46,6 +57,8 @@ impl PersonalPaymentCodeSignalling {
         let index = self.payment_signals_index.get_or_default();
         self.payment_signals.set(&index, signal);
         self.payment_signals_index.set(index + 1);
+
+        PersonalPaymentCodeSignallingPost { signal }.emit();
     }
 
     pub fn get_payment_signal(&self, index: u32) -> Option<PaymentSignal> {
@@ -53,12 +66,22 @@ impl PersonalPaymentCodeSignalling {
     }
 }
 
+#[derive(Event, PartialEq, Eq, Debug)]
+pub struct PersonalPaymentCodeSignallingPost {
+    pub signal: PaymentSignal
+}
+
+
 #[cfg(test)]
 mod tests {
-    use odra::TestEnv;
+    use odra::{TestEnv, assert_events};
 
     use super::{
-        MasterPaymentCode, PersonalPaymentCodeSignalling, PersonalPaymentCodeSignallingRef, Error
+        MasterPaymentCode, MasterPaymentCodeSet,
+        PersonalPaymentCodeSignalling,
+        PersonalPaymentCodeSignallingRef,
+        PersonalPaymentCodeSignallingPost,
+        Error
     };
 
     #[test]
@@ -72,9 +95,18 @@ mod tests {
         // Register Ali contract.
         let ali_key = String::from("ali");
         let ali_code = [22u8; 32];
-        let ali_singal = [24u8; 32];
+        let ali_signal = [24u8; 32];
         master_contract.set(ali_key.clone(), ali_contract.address(), ali_code);
         
+        assert_events!(
+            master_contract, 
+            MasterPaymentCodeSet {
+                key: ali_key.clone(),
+                contract_address: ali_contract.address(),
+                code: ali_code
+            }
+        );
+
         // Register Ali again and that fails.
         TestEnv::assert_exception(
             Error::NameAlreadyExists,
@@ -87,6 +119,15 @@ mod tests {
         let bob_signal = [25u8; 32];
         master_contract.set(bob_key.clone(), bob_contract.address(), bob_code);
 
+        assert_events!(
+            master_contract, 
+            MasterPaymentCodeSet {
+                key: bob_key.clone(),
+                contract_address: bob_contract.address(),
+                code: bob_code
+            }
+        );
+
         // Ali queries for Bob's address.
         let bob_address = master_contract.get_address_from_name(bob_key).unwrap();
         
@@ -95,16 +136,22 @@ mod tests {
 
         // Ali sends signal to Bob.
         TestEnv::set_caller(&ali);
-        PersonalPaymentCodeSignallingRef::at(bob_address).post(ali_singal);
+        PersonalPaymentCodeSignallingRef::at(bob_address).post(ali_signal);
+        assert_events!(bob_contract, PersonalPaymentCodeSignallingPost {
+            signal: ali_signal
+        });
 
         // Bob do the same.
         TestEnv::set_caller(&bob);
         PersonalPaymentCodeSignallingRef::at(ali_address).post(bob_signal);
+        assert_events!(ali_contract, PersonalPaymentCodeSignallingPost {
+            signal: bob_signal
+        });
 
         // Checks
         assert_eq!(ali_contract.get_payment_signal(0), Some(bob_signal));
         assert_eq!(ali_contract.get_payment_signal(1), None);
-        assert_eq!(bob_contract.get_payment_signal(0), Some(ali_singal));
+        assert_eq!(bob_contract.get_payment_signal(0), Some(ali_signal));
         assert_eq!(bob_contract.get_payment_signal(1), None);
     }
 }
