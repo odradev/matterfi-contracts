@@ -4,7 +4,7 @@ Smart contracts using [Odra Framework](https://github.com/odradev/odra).
 Note that the Odra is still under heavy development.
 
 ## Prepare
-First install Rust, Make and Git.
+First install Rust, Make, WebAssembly Binary Toolkit (wabt), Perl and Git.
 
 Install Cargo Odra.
 ```bash
@@ -24,6 +24,15 @@ $ rustup target add wasm32-unknown-unknown
 Add `wasm-strip`.
 ```bash
 $ sudo apt install wabt
+# or for Fedora
+$ sudo dnf install wabt
+```
+
+Install Perl
+```bash
+$ sudo apt install perl
+# or for Fedora
+$ sudo dnf install perl-core
 ```
 
 ## Test on MockVM
