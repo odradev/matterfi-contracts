@@ -1,18 +1,24 @@
-use odra::{Mapping, types::{event::Event, Address}, Variable, execution_error, ContractEnv, Event};
+use odra::{
+    execution_error,
+    types::{event::Event, Address},
+    ContractEnv, Event, Mapping, Variable,
+};
 
 type PaymentCode = [u8; 32];
+/// PaymentSignal is an encrypted PaymentCode
 type PaymentSignal = [u8; 32];
 
 execution_error! {
     pub enum Error {
-        NameAlreadyExists => 1
+        NameAlreadyExists => 1,
+        PaymentCodeAlreadyExists => 2,
     }
 }
 
 #[odra::module]
 pub struct MasterPaymentCode {
     by_name: Mapping<String, Address>,
-    by_code: Mapping<PaymentCode, Address>
+    by_code: Mapping<PaymentCode, Address>,
 }
 
 #[odra::module]
@@ -21,12 +27,18 @@ impl MasterPaymentCode {
         if self.by_name.get(&key).is_some() {
             ContractEnv::revert(Error::NameAlreadyExists);
         }
+        if self.by_code.get(&code).is_some() {
+            ContractEnv::revert(Error::PaymentCodeAlreadyExists);
+        }
         self.by_name.set(&key, contract_address);
         self.by_code.set(&code, contract_address);
 
         MasterPaymentCodeSet {
-            key, contract_address, code
-        }.emit();
+            key,
+            contract_address,
+            code,
+        }
+        .emit();
     }
 
     pub fn get_address_from_name(&self, key: String) -> Option<Address> {
@@ -42,13 +54,13 @@ impl MasterPaymentCode {
 pub struct MasterPaymentCodeSet {
     pub key: String,
     pub contract_address: Address,
-    pub code: PaymentCode
+    pub code: PaymentCode,
 }
 
 #[odra::module]
 pub struct PersonalPaymentCodeSignalling {
     payment_signals: Mapping<u32, PaymentSignal>,
-    payment_signals_index: Variable<u32>
+    payment_signals_index: Variable<u32>,
 }
 
 #[odra::module]
@@ -68,26 +80,22 @@ impl PersonalPaymentCodeSignalling {
 
 #[derive(Event, PartialEq, Eq, Debug)]
 pub struct PersonalPaymentCodeSignallingPost {
-    pub signal: PaymentSignal
+    pub signal: PaymentSignal,
 }
-
 
 #[cfg(test)]
 mod tests {
-    use odra::{TestEnv, assert_events};
+    use odra::{assert_events, TestEnv};
 
     use super::{
-        MasterPaymentCode, MasterPaymentCodeSet,
-        PersonalPaymentCodeSignalling,
-        PersonalPaymentCodeSignallingRef,
-        PersonalPaymentCodeSignallingPost,
-        Error
+        Error, MasterPaymentCode, MasterPaymentCodeSet, PersonalPaymentCodeSignalling,
+        PersonalPaymentCodeSignallingPost, PersonalPaymentCodeSignallingRef,
     };
 
     #[test]
     fn test_simple_scenario() {
         let (ali, bob) = (TestEnv::get_account(0), TestEnv::get_account(1));
-        
+
         let master_contract = MasterPaymentCode::deploy();
         let ali_contract = PersonalPaymentCodeSignalling::deploy();
         let bob_contract = PersonalPaymentCodeSignalling::deploy();
@@ -97,9 +105,9 @@ mod tests {
         let ali_code = [22u8; 32];
         let ali_signal = [24u8; 32];
         master_contract.set(ali_key.clone(), ali_contract.address(), ali_code);
-        
+
         assert_events!(
-            master_contract, 
+            master_contract,
             MasterPaymentCodeSet {
                 key: ali_key.clone(),
                 contract_address: ali_contract.address(),
@@ -107,11 +115,17 @@ mod tests {
             }
         );
 
+        let chuck_code = [24u8; 32];
         // Register Ali again and that fails.
-        TestEnv::assert_exception(
-            Error::NameAlreadyExists,
-            || master_contract.set(ali_key.clone(), ali_contract.address(), ali_code)
-        );
+        // Fail on duplicated unique name
+        TestEnv::assert_exception(Error::NameAlreadyExists, || {
+            master_contract.set(ali_key.clone(), ali_contract.address(), chuck_code)
+        });
+
+        // Fail on duplicated payment code
+        TestEnv::assert_exception(Error::PaymentCodeAlreadyExists, || {
+            master_contract.set(String::from("chuck"), ali_contract.address(), ali_code)
+        });
 
         // Register Bob.
         let bob_key = String::from("bob");
@@ -120,7 +134,7 @@ mod tests {
         master_contract.set(bob_key.clone(), bob_contract.address(), bob_code);
 
         assert_events!(
-            master_contract, 
+            master_contract,
             MasterPaymentCodeSet {
                 key: bob_key.clone(),
                 contract_address: bob_contract.address(),
@@ -130,23 +144,25 @@ mod tests {
 
         // Ali queries for Bob's address.
         let bob_address = master_contract.get_address_from_name(bob_key).unwrap();
-        
+
         // Bob do the same.
         let ali_address = master_contract.get_address_from_name(ali_key).unwrap();
 
         // Ali sends signal to Bob.
         TestEnv::set_caller(&ali);
         PersonalPaymentCodeSignallingRef::at(bob_address).post(ali_signal);
-        assert_events!(bob_contract, PersonalPaymentCodeSignallingPost {
-            signal: ali_signal
-        });
+        assert_events!(
+            bob_contract,
+            PersonalPaymentCodeSignallingPost { signal: ali_signal }
+        );
 
         // Bob do the same.
         TestEnv::set_caller(&bob);
         PersonalPaymentCodeSignallingRef::at(ali_address).post(bob_signal);
-        assert_events!(ali_contract, PersonalPaymentCodeSignallingPost {
-            signal: bob_signal
-        });
+        assert_events!(
+            ali_contract,
+            PersonalPaymentCodeSignallingPost { signal: bob_signal }
+        );
 
         // Checks
         assert_eq!(ali_contract.get_payment_signal(0), Some(bob_signal));

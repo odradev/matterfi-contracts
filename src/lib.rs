@@ -1,2 +1,5 @@
 pub mod payment;
-pub use payment::{MasterPaymentCode, MasterPaymentCodeRef, PersonalPaymentCodeSignalling, PersonalPaymentCodeSignallingRef};
+pub use payment::{
+    MasterPaymentCode, MasterPaymentCodeRef, PersonalPaymentCodeSignalling,
+    PersonalPaymentCodeSignallingRef,
+};
