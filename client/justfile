@@ -1,0 +1,122 @@
+# Call paramenters.
+NODE_ADDRESS := "--node-address http://3.140.179.157:7777"
+CHAIN_NAME := "--chain-name integration-test"
+DEPLOY_COMMON_PARAMS := NODE_ADDRESS + " " + CHAIN_NAME
+
+# casper-client commands.
+CLIENT_GET_STATE_ROOT_HASH := "casper-client get-state-root-hash " + NODE_ADDRESS 
+CLIENT_GET_ACCOUNT := "casper-client get-account-info " + NODE_ADDRESS
+CLIENT_GET_BALANCE := "casper-client get-balance " + NODE_ADDRESS
+CLIENT_GET_DICTIONARY_ITEM := "casper-client get-dictionary-item " + NODE_ADDRESS 
+CLIENT_GET_DEPLOY := "casper-client get-deploy " + NODE_ADDRESS 
+CLIENT_QUERY := "casper-client query-global-state " + NODE_ADDRESS
+CLIENT_TRANSFER := "casper-client transfer " + DEPLOY_COMMON_PARAMS
+CLIENT_DEPLOY := "casper-client put-deploy " + DEPLOY_COMMON_PARAMS
+
+# Main account.
+PUBLIC_KEY_HEX := `cat integration-keys/public_key_hex`
+SECRET_KEY := "integration-keys/secret_key.pem"
+
+# Faucet account.
+FAUCET_SECRET_KEY := "integration-keys2/secret_key.pem"
+
+# Variable repository.
+REPO_WASM := "master_payment_code.wasm"
+REPO_PACKAGE_HASH_NAMED_KEY := "master_payment_code_package_hash"
+
+default:
+    just --list
+
+account-info:
+    {{CLIENT_GET_ACCOUNT}} --public-key {{PUBLIC_KEY_HEX}}
+
+account-main-purse:
+    just account-info | jq -r ".result.account.main_purse" 
+
+account-balance:
+    {{CLIENT_GET_BALANCE}} \
+        --purse-uref `just account-main-purse` \
+        --state-root-hash `just state-root-hash` \
+        | jq -r ".result.balance_value"
+
+state-root-hash:
+    {{CLIENT_GET_STATE_ROOT_HASH}} | jq -r ".result.state_root_hash"
+
+event-item-key-hash key:
+    cd parser && cargo run --release "to-dictionary-item-key" {{key}}
+
+bytes-to-address bytes:
+    cd parser && cargo run --release "bytes-to-address" {{bytes}}
+
+transfer-cspr:
+    {{CLIENT_TRANSFER}} \
+        --amount 1000000000000 \
+        --secret-key {{FAUCET_SECRET_KEY}} \
+        --target-account {{PUBLIC_KEY_HEX}} \
+        --transfer-id 1 \
+        --payment-amount 100000
+
+deploy-master-contract:
+    {{CLIENT_DEPLOY}} \
+        --secret-key {{SECRET_KEY}} \
+        --session-path {{REPO_WASM}} \
+        --payment-amount 120000000000
+
+master-contract-hash:
+    {{CLIENT_QUERY}} \
+        --state-root-hash `just state-root-hash` \
+        --key "{{PUBLIC_KEY_HEX}}" \
+        -q {{REPO_PACKAGE_HASH_NAMED_KEY}} \
+        | jq -r ".result.stored_value.ContractPackage.versions[0].contract_hash" \
+        | sed s/contract/hash/
+
+master-contract-info:
+    {{CLIENT_QUERY}} \
+        --state-root-hash `just state-root-hash` \
+        --key `just master-contract-hash`
+
+master-contract-set2:
+    {{CLIENT_DEPLOY}} \
+        --secret-key {{SECRET_KEY}} \
+        --payment-amount 1000000000 \
+        --session-hash `just master-contract-hash` \
+        --session-entry-point "set2" \
+        --session-arg "key:string:'mykey'" \
+        --session-arg "value:u8='2'" \
+
+master-contract-events-uref:
+    {{CLIENT_QUERY}} \
+        --state-root-hash `just state-root-hash` \
+        --key `just master-contract-hash` \
+        | jq -r ".result.stored_value.Contract.named_keys[] | select( .name == \"__events\") | .key"
+
+master-contract-events-count:
+    {{CLIENT_QUERY}} \
+        --state-root-hash `just state-root-hash` \
+        --key `just master-contract-hash` \
+        -q "__events_length" \
+        | jq ".result.stored_value.CLValue.parsed"
+
+master-contract-event number:
+    {{CLIENT_GET_DICTIONARY_ITEM}} \
+        --state-root-hash `just state-root-hash` \
+        --contract-hash `just master-contract-hash` \
+        --dictionary-name __events \
+        --dictionary-item-key {{number}} \
+        | jq -r ".result.stored_value.CLValue.parsed"
+
+master-contract-get-address-by-name name:
+    just bytes-to-address `just master-contract-get-bytes-by-name {{name}}`
+
+master-contract-get-bytes-by-name name:
+    {{CLIENT_GET_DICTIONARY_ITEM}} \
+        --state-root-hash `just state-root-hash` \
+        --seed-uref `just master-contract-mapping-by-name-uref` \
+        --dictionary-item-key `just event-item-key-hash {{name}}` \
+        | jq -r ".result.stored_value.CLValue.bytes"
+
+master-contract-mapping-by-name-uref:
+    {{CLIENT_QUERY}} \
+        --state-root-hash `just state-root-hash` \
+        --key `just master-contract-hash` \
+        | jq -r ".result.stored_value.Contract.named_keys[] | select( .name == \"by_name_contract\") | .key"
