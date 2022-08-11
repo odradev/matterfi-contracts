@@ -24,7 +24,6 @@ name = "casper"
 dependency_name = "casper"
 
 [backends.casper.dependency]
-git = "https://github.com/odradev/odra-casper"
-branch = "develop"
+version = "*"
 features = []
 optional = false
