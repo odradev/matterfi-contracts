@@ -120,3 +120,7 @@ master-contract-mapping-by-name-uref:
         --state-root-hash `just state-root-hash` \
         --key `just master-contract-hash` \
         | jq -r ".result.stored_value.Contract.named_keys[] | select( .name == \"by_name_contract\") | .key"
+
+run-shared-parser:
+    cd shared-parser && cargo build --release
+    cd use-parser && cargo run
