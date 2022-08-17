@@ -4,14 +4,15 @@ use odra::{
     ContractEnv, Event, Mapping, Variable,
 };
 
-type PaymentCode = [u8; 32];
+type PaymentCode = Vec<u8>; //Bytes
 /// PaymentSignal is an encrypted PaymentCode
-type PaymentSignal = [u8; 32];
+type PaymentSignal = Vec<u8>;
 
 execution_error! {
     pub enum Error {
         NameAlreadyExists => 1,
         PaymentCodeAlreadyExists => 2,
+        IncorrectPaymentCodeLength => 3,
     }
 }
 
@@ -23,7 +24,16 @@ pub struct MasterPaymentCode {
 
 #[odra::module]
 impl MasterPaymentCode {
-    pub fn set(&self, key: String, contract_address: Address, code: PaymentCode) {
+    pub fn set(&self, key: String, value: String) {
+        
+        if let Ok(converted_value) = hex::decode(&value) {
+            self.set_impl(key, ContractEnv::caller(), converted_value);
+        } else {
+            ContractEnv::revert(Error::IncorrectPaymentCodeLength);
+        }
+    }
+
+    pub fn set_impl(&self, key: String, contract_address: Address, code: PaymentCode) {
         if self.by_name.get(&key).is_some() {
             ContractEnv::revert(Error::NameAlreadyExists);
         }
@@ -67,7 +77,7 @@ pub struct PersonalPaymentCodeSignalling {
 impl PersonalPaymentCodeSignalling {
     pub fn post(&self, signal: PaymentSignal) {
         let index = self.payment_signals_index.get_or_default();
-        self.payment_signals.set(&index, signal);
+        self.payment_signals.set(&index, signal.clone());
         self.payment_signals_index.set(index + 1);
 
         PersonalPaymentCodeSignallingPost { signal }.emit();
@@ -102,43 +112,43 @@ mod tests {
 
         // Register Ali contract.
         let ali_key = String::from("ali");
-        let ali_code = [22u8; 32];
-        let ali_signal = [24u8; 32];
-        master_contract.set(ali_key.clone(), ali_contract.address(), ali_code);
+        let ali_code = vec![22u8; 39];
+        let ali_signal = vec![24u8; 32];
+        master_contract.set_impl(ali_key.clone(), ali_contract.address(), ali_code.clone());
 
         assert_events!(
             master_contract,
             MasterPaymentCodeSet {
                 key: ali_key.clone(),
                 contract_address: ali_contract.address(),
-                code: ali_code
+                code: ali_code.clone()
             }
         );
 
-        let chuck_code = [24u8; 32];
+        let chuck_code = vec![24u8; 39];
         // Register Ali again and that fails.
         // Fail on duplicated unique name
         TestEnv::assert_exception(Error::NameAlreadyExists, || {
-            master_contract.set(ali_key.clone(), ali_contract.address(), chuck_code)
+            master_contract.set_impl(ali_key.clone(), ali_contract.address(), chuck_code.clone())
         });
 
         // Fail on duplicated payment code
         TestEnv::assert_exception(Error::PaymentCodeAlreadyExists, || {
-            master_contract.set(String::from("chuck"), ali_contract.address(), ali_code)
+            master_contract.set_impl(String::from("chuck"), ali_contract.address(), ali_code.clone())
         });
 
         // Register Bob.
         let bob_key = String::from("bob");
-        let bob_code = [23u8; 32];
-        let bob_signal = [25u8; 32];
-        master_contract.set(bob_key.clone(), bob_contract.address(), bob_code);
+        let bob_code = vec![23u8; 39];
+        let bob_signal = vec![25u8; 32];
+        master_contract.set_impl(bob_key.clone(), bob_contract.address(), bob_code.clone());
 
         assert_events!(
             master_contract,
             MasterPaymentCodeSet {
                 key: bob_key.clone(),
                 contract_address: bob_contract.address(),
-                code: bob_code
+                code: bob_code.clone()
             }
         );
 
@@ -150,18 +160,18 @@ mod tests {
 
         // Ali sends signal to Bob.
         TestEnv::set_caller(&ali);
-        PersonalPaymentCodeSignallingRef::at(bob_address).post(ali_signal);
+        PersonalPaymentCodeSignallingRef::at(bob_address).post(ali_signal.clone());
         assert_events!(
             bob_contract,
-            PersonalPaymentCodeSignallingPost { signal: ali_signal }
+            PersonalPaymentCodeSignallingPost { signal: ali_signal.clone() }
         );
 
         // Bob do the same.
         TestEnv::set_caller(&bob);
-        PersonalPaymentCodeSignallingRef::at(ali_address).post(bob_signal);
+        PersonalPaymentCodeSignallingRef::at(ali_address).post(bob_signal.clone());
         assert_events!(
             ali_contract,
-            PersonalPaymentCodeSignallingPost { signal: bob_signal }
+            PersonalPaymentCodeSignallingPost { signal: bob_signal.clone() }
         );
 
         // Checks
