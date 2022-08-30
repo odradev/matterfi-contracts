@@ -6,7 +6,6 @@ use blake2::{
     digest::{Update, VariableOutput},
     VarBlake2b,
 };
-
 fn to_dictionary_item_key<T: ToBytes + Clone + Debug>(key: &T) -> String {
     let preimage = key.to_bytes().unwrap();
     let hash = blake2b(preimage);
@@ -57,7 +56,11 @@ fn main() {
             let result = to_dictionary_item_key(&index);
             println!("{}", result);
         },
-
+        "u32-to-dictionary-item-key" => {
+            let index: u32 = args[2].parse().unwrap();
+            let result = to_dictionary_item_key(&index);
+            println!("{}", result);
+        },
         "bytes-to-address" => {
             let bytes: Vec<u8> = hex::decode(&args[2]).unwrap();
             let (raw_bytes, bytes): (Bytes, _) = FromBytes::from_bytes(&bytes).unwrap();

@@ -45,6 +45,9 @@ state-root-hash:
 event-item-key-hash key:
     cd parser && cargo run --release "to-dictionary-item-key" {{key}}
 
+payment-signal-dictionary-item-key key:
+    cd parser && cargo run --release "u32-to-dictionary-item-key" {{key}}
+
 bytes-to-address bytes:
     cd parser && cargo run --release "bytes-to-address" {{bytes}}
 
@@ -103,6 +106,14 @@ master-contract-event number:
         --contract-hash `just master-contract-hash` \
         --dictionary-name __events \
         --dictionary-item-key {{number}} \
+        | jq -r ".result.stored_value.CLValue.parsed"
+
+master-contract-payment-signals index:
+    {{CLIENT_GET_DICTIONARY_ITEM}} \
+        --state-root-hash `just state-root-hash` \
+        --contract-hash `just master-contract-hash` \
+        --dictionary-name payment_signals_contract \
+        --dictionary-item-key `just payment-signal-dictionary-item-key {{index}}` \
         | jq -r ".result.stored_value.CLValue.parsed"
 
 master-contract-get-address-by-name name:
