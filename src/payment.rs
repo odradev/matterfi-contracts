@@ -1,15 +1,10 @@
-use odra::{
-    execution_error,
-    types::{event::Event, Address, NamedArg},
-    ContractEnv, Event, Mapping, Variable,
-};
+use odra::{execution_error, types::event::Event, ContractEnv, Event, Mapping, Variable};
 
 type PaymentCode = Vec<u8>; //Bytes
 /// PaymentSignal is an encrypted PaymentCode
 type PaymentSignal = Vec<u8>;
 
 type Name = String;
-type PersonalContractAddress = Address;
 
 execution_error! {
     pub enum Error {
@@ -21,74 +16,40 @@ execution_error! {
 
 #[odra::module]
 pub struct MasterPaymentCode {
-    name_to_contract_address: Mapping<Name, PersonalContractAddress>,
     name_to_plain_payment_code: Mapping<Name, PaymentCode>,
+
+    payment_signals: Mapping<u32, PaymentSignal>,
+    payment_signals_index: Variable<u32>,
+}
+
+#[derive(Event, PartialEq, Eq, Debug)]
+pub struct PersonalPaymentCodeSignallingPost {
+    pub signal: PaymentSignal,
 }
 
 #[odra::module]
 impl MasterPaymentCode {
     pub fn set(&self, key: Name, plain_payment_code: String) {
-        
-        if let Ok(converted_value) =  hex::decode(&plain_payment_code) {
-            self.set_impl(key, ContractEnv::caller(), converted_value);
+        if let Ok(converted_value) = hex::decode(&plain_payment_code) {
+            self.set_impl(key, converted_value);
         } else {
             ContractEnv::revert(Error::IncorrectPaymentCodeLength);
         }
     }
-    // pub fn set(&self, key: String, value: String) {
-        
-    //     if let Ok(converted_value) = hex::decode(&value) {
-    //         self.set_impl(key, ContractEnv::caller(), converted_value);
-    //     } else {
-    //         ContractEnv::revert(Error::IncorrectPaymentCodeLength);
-    //     }
-    // }
 
-    pub fn set_impl(&self, key: Name, contract_address: Address, plain_payment_code: PaymentCode) {
-        if self.name_to_contract_address.get(&key).is_some() {
-            ContractEnv::revert(Error::NameAlreadyExists);
-        }
+    pub fn set_impl(&self, key: Name, plain_payment_code: PaymentCode) {
         if self.name_to_plain_payment_code.get(&key).is_some() {
             ContractEnv::revert(Error::PaymentCodeAlreadyExists);
         }
-        self.name_to_contract_address.set(&key, contract_address);
-        self.name_to_plain_payment_code.set(&key, plain_payment_code.clone());
-
-        // MasterPaymentCodeSet {
-        //     key,
-        //     contract_address,
-        //     plain_payment_code,
-        // }
-        // .emit();
-    }
-
-    pub fn get_contract_from_name(&self, key: Name) -> Option<Address> {
-        self.name_to_contract_address.get(&key)
+        self.name_to_plain_payment_code
+            .set(&key, plain_payment_code);
     }
 
     pub fn get_payment_code_from_name(&self, key: Name) -> Option<String> {
         let encoded_payment_code = self.name_to_plain_payment_code.get(&key);
-        let plain_payment_code = Some(hex::encode(encoded_payment_code.unwrap()));
-        return plain_payment_code;
-
+        Some(hex::encode(encoded_payment_code.unwrap()))
     }
-}
 
-// #[derive(Event, PartialEq, Eq, Debug)]
-// pub struct MasterPaymentCodeSet {
-//     pub key: Name,
-//     pub contract_address: PersonalContractAddress,
-//     pub plain_payment_code: PaymentCode,
-// }
-
-#[odra::module]
-pub struct PersonalPaymentCodeSignalling {
-    payment_signals: Mapping<u32, PaymentSignal>,
-    payment_signals_index: Variable<u32>,
-}
-
-#[odra::module]
-impl PersonalPaymentCodeSignalling {
     pub fn post(&self, signal: PaymentSignal) {
         let index = self.payment_signals_index.get_or_default();
         self.payment_signals.set(&index, signal.clone());
@@ -102,10 +63,33 @@ impl PersonalPaymentCodeSignalling {
     }
 }
 
-#[derive(Event, PartialEq, Eq, Debug)]
-pub struct PersonalPaymentCodeSignallingPost {
-    pub signal: PaymentSignal,
-}
+// #[derive(Event, PartialEq, Eq, Debug)]
+// pub struct MasterPaymentCodeSet {
+//     pub key: Name,
+//     pub contract_address: PersonalContractAddress,
+//     pub plain_payment_code: PaymentCode,
+// }
+
+// #[odra::module]
+// pub struct PersonalPaymentCodeSignalling {
+//     payment_signals: Mapping<u32, PaymentSignal>,
+//     payment_signals_index: Variable<u32>,
+// }
+
+// #[odra::module]
+// impl PersonalPaymentCodeSignalling {
+//     pub fn post(&self, signal: PaymentSignal) {
+//         let index = self.payment_signals_index.get_or_default();
+//         self.payment_signals.set(&index, signal.clone());
+//         self.payment_signals_index.set(index + 1);
+
+//         PersonalPaymentCodeSignallingPost { signal }.emit();
+//     }
+
+//     pub fn get_payment_signal(&self, index: u32) -> Option<PaymentSignal> {
+//         self.payment_signals.get(&index)
+//     }
+// }
 
 // #[cfg(test)]
 // mod tests {
