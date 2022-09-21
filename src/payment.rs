@@ -10,7 +10,9 @@ execution_error! {
     pub enum Error {
         NameAlreadyExists => 1,
         PaymentCodeAlreadyExists => 2,
-        IncorrectPaymentCodeLength => 3,
+        PaymentCodeDoesntExits => 3,
+        IncorrectPaymentCodeLength => 4,
+        IncorrectPaymentSignalLength => 5,
     }
 }
 
@@ -18,8 +20,14 @@ execution_error! {
 pub struct MasterPaymentCode {
     name_to_plain_payment_code: Mapping<Name, PaymentCode>,
 
+    // payment_signals: Mapping<PaymentCode, (PaymentSignal, u32)>,
+    // payment_signals_index: Mapping<PaymentCode, Variable<u32>>,
+    payment_signals_mapping: Mapping<PaymentCode, Vec<u32>>,
     payment_signals: Mapping<u32, PaymentSignal>,
     payment_signals_index: Variable<u32>,
+    // paymens_signals = [ (0, "AliceToMichael"), (1, "BobToAlice"), (2, "BobToGeorge"), (3, "BobToAlpha"), (4, "GeorgeToAlpha") ]
+    // payment_signals_index = 4
+    // payment_signals_mapping = [[Alice, [0, 1]],[Bob, [1, 2, 3]], [Michael, [0]]
 }
 
 #[derive(Event, PartialEq, Eq, Debug)]
@@ -29,38 +37,87 @@ pub struct PersonalPaymentCodeSignallingPost {
 
 #[odra::module]
 impl MasterPaymentCode {
-    pub fn set(&self, key: Name, plain_payment_code: String) {
-        if let Ok(converted_value) = hex::decode(&plain_payment_code) {
-            self.set_impl(key, converted_value);
+    pub fn set_user(&self, key: Name, plain_payment_code: String) {
+        if let Ok(converted_value) = bs58::decode(&plain_payment_code)
+            .with_alphabet(bs58::Alphabet::BITCOIN)
+            .into_vec()
+        {
+            if self.name_to_plain_payment_code.get(&key).is_some() {
+                ContractEnv::revert(Error::NameAlreadyExists);
+            }
+            self.name_to_plain_payment_code.set(&key, converted_value.clone());
+
+            if self
+                .payment_signals_mapping
+                .get(&converted_value)
+                .is_none()
+            {
+                self.payment_signals_mapping.set(&converted_value.clone(), Vec::new());
+            }
         } else {
             ContractEnv::revert(Error::IncorrectPaymentCodeLength);
         }
     }
 
-    pub fn set_impl(&self, key: Name, plain_payment_code: PaymentCode) {
-        if self.name_to_plain_payment_code.get(&key).is_some() {
-            ContractEnv::revert(Error::PaymentCodeAlreadyExists);
+    pub fn set_pcode(&self, plain_payment_code: String) {
+        if let Ok(converted_value) = bs58::decode(&plain_payment_code)
+            .with_alphabet(bs58::Alphabet::BITCOIN)
+            .into_vec()
+        {
+            if self.payment_signals_mapping.get(&converted_value).is_some() {
+                ContractEnv::revert(Error::PaymentCodeAlreadyExists);
+            }
+            self.payment_signals_mapping.set(&converted_value.clone(), Vec::new());
+        } else {
+            ContractEnv::revert(Error::IncorrectPaymentCodeLength);
         }
-        self.name_to_plain_payment_code
-            .set(&key, plain_payment_code);
     }
 
-    pub fn get_payment_code_from_name(&self, key: Name) -> Option<String> {
-        let encoded_payment_code = self.name_to_plain_payment_code.get(&key);
-        Some(hex::encode(encoded_payment_code.unwrap()))
+    pub fn set_signal(&self, recipient_payment_code: String, masked_payment_code: String) {
+        if let Ok(converted_recipient_payment_code) = bs58::decode(&recipient_payment_code)
+            .with_alphabet(bs58::Alphabet::BITCOIN)
+            .into_vec()
+        {
+            if self
+                .payment_signals_mapping
+                .get(&converted_recipient_payment_code)
+                .is_none()
+            {
+                ContractEnv::revert(Error::PaymentCodeDoesntExits);
+            }
+            let mut payment_code_signals_map = self
+                .payment_signals_mapping
+                .get(&converted_recipient_payment_code)
+                .unwrap(); // Vec<u32>
+
+            let index = self.payment_signals_index.get_or_default();
+
+            if let Ok(converted_masked_payment_code) = bs58::decode(&masked_payment_code)
+                .with_alphabet(bs58::Alphabet::BITCOIN)
+                .into_vec()
+            {
+                self.payment_signals
+                    .set(&index, converted_masked_payment_code);
+                payment_code_signals_map.push(index);
+                self.payment_signals_index.set(index + 1);
+            } else {
+                ContractEnv::revert(Error::IncorrectPaymentSignalLength);
+            }
+        } else {
+            ContractEnv::revert(Error::IncorrectPaymentCodeLength);
+        }
+
+        //PersonalPaymentCodeSignallingPost { signal }.emit();
     }
 
-    pub fn post(&self, signal: PaymentSignal) {
-        let index = self.payment_signals_index.get_or_default();
-        self.payment_signals.set(&index, signal.clone());
-        self.payment_signals_index.set(index + 1);
-
-        PersonalPaymentCodeSignallingPost { signal }.emit();
-    }
-
-    pub fn get_payment_signal(&self, index: u32) -> Option<PaymentSignal> {
-        self.payment_signals.get(&index)
-    }
+    // pub fn get_payment_code_from_name(&self, key: Name) -> Option<String> {
+    //     let encoded_payment_code = self.name_to_plain_payment_code.get(&key);
+    //     Some(hex::encode(encoded_payment_code.unwrap()))
+    // }
+    //
+    // pub fn get_payment_signal(&self, index: u32) -> Option<PaymentSignal> {
+    //     self.payment_signals.get(&index)
+    // }
 }
 
 // #[derive(Event, PartialEq, Eq, Debug)]
@@ -74,21 +131,6 @@ impl MasterPaymentCode {
 // pub struct PersonalPaymentCodeSignalling {
 //     payment_signals: Mapping<u32, PaymentSignal>,
 //     payment_signals_index: Variable<u32>,
-// }
-
-// #[odra::module]
-// impl PersonalPaymentCodeSignalling {
-//     pub fn post(&self, signal: PaymentSignal) {
-//         let index = self.payment_signals_index.get_or_default();
-//         self.payment_signals.set(&index, signal.clone());
-//         self.payment_signals_index.set(index + 1);
-
-//         PersonalPaymentCodeSignallingPost { signal }.emit();
-//     }
-
-//     pub fn get_payment_signal(&self, index: u32) -> Option<PaymentSignal> {
-//         self.payment_signals.get(&index)
-//     }
 // }
 
 // #[cfg(test)]
