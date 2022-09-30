@@ -4,27 +4,12 @@ name = "matterfi"
 path = "src/master_payment_code.rs"
 name = "master_payment_code"
 fqn = "matterfi::MasterPaymentCode"
- 
-[contracts.personal_payment_code_signalling]
-path = "src/personal_payment_code_signalling.rs"
-name = "personal_payment_code_signalling"
-fqn = "matterfi::PersonalPaymentCodeSignalling"
-
-[backends.casper2]
-name = "casper2"
-dependency_name = "casper"
-
-[backends.casper2.dependency]
-path = "../odra/odra-casper/"
-features = []
-optional = false
 
 [backends.casper]
 name = "casper"
 dependency_name = "casper"
 
 [backends.casper.dependency]
-git = "https://github.com/odradev/odra-casper"
-branch = "develop"
+version = "*"
 features = []
 optional = false

@@ -1,0 +1,13 @@
+[package]
+name = "shared-parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+casper-types = "1.5.0"
+odra-casper-shared = "0.1.0"
+odra-types = "0.1.0"
+
+[lib]
+crate-type = [ "cdylib" ]
+name = "shared_parser"
