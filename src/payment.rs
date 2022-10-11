@@ -35,24 +35,44 @@ pub struct PersonalPaymentCodeSignallingPost {
     pub signal: PaymentSignal,
 }
 
+pub fn as_u8_slice(v: &[u32]) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts(
+            v.as_ptr() as *const u8,
+            v.len() * std::mem::size_of::<u32>(),
+        )
+    }
+}
+
 #[odra::module]
 impl MasterPaymentCode {
-    pub fn set_user(&self, key: Name, plain_payment_code: String) {
+    pub fn get_codes(&self, plain_payment_code: String) -> String {
         if let Ok(converted_value) = bs58::decode(&plain_payment_code)
             .with_alphabet(bs58::Alphabet::BITCOIN)
             .into_vec()
         {
-            if self.name_to_plain_payment_code.get(&key).is_some() {
-                ContractEnv::revert(Error::NameAlreadyExists);
-            }
-            self.name_to_plain_payment_code.set(&key, converted_value.clone());
+            return bs58::encode(as_u8_slice(
+                &self.payment_signals_mapping.get(&converted_value).unwrap(),
+            ))
+            .into_string();
+        }
+        String::new()
+    }
 
-            if self
-                .payment_signals_mapping
-                .get(&converted_value)
-                .is_none()
-            {
-                self.payment_signals_mapping.set(&converted_value.clone(), Vec::new());
+    pub fn set_user(&self, key: Name, plain_payment_code: String) {
+        if self.name_to_plain_payment_code.get(&key).is_some() {
+            ContractEnv::revert(Error::NameAlreadyExists);
+        }
+        if let Ok(converted_value) = bs58::decode(&plain_payment_code)
+            .with_alphabet(bs58::Alphabet::BITCOIN)
+            .into_vec()
+        {
+            self.name_to_plain_payment_code
+                .set(&key, converted_value.clone());
+
+            if self.payment_signals_mapping.get(&converted_value).is_none() {
+                self.payment_signals_mapping
+                    .set(&converted_value, Vec::new());
             }
         } else {
             ContractEnv::revert(Error::IncorrectPaymentCodeLength);
@@ -67,7 +87,8 @@ impl MasterPaymentCode {
             if self.payment_signals_mapping.get(&converted_value).is_some() {
                 ContractEnv::revert(Error::PaymentCodeAlreadyExists);
             }
-            self.payment_signals_mapping.set(&converted_value.clone(), Vec::new());
+            self.payment_signals_mapping
+                .set(&converted_value, Vec::new());
         } else {
             ContractEnv::revert(Error::IncorrectPaymentCodeLength);
         }
@@ -85,23 +106,28 @@ impl MasterPaymentCode {
             {
                 ContractEnv::revert(Error::PaymentCodeDoesntExits);
             }
-            let mut payment_code_signals_map = self
+
+            if let Some(mut payment_code_signals_vec) = self
                 .payment_signals_mapping
                 .get(&converted_recipient_payment_code)
-                .unwrap(); // Vec<u32>
-
-            let index = self.payment_signals_index.get_or_default();
-
-            if let Ok(converted_masked_payment_code) = bs58::decode(&masked_payment_code)
-                .with_alphabet(bs58::Alphabet::BITCOIN)
-                .into_vec()
             {
-                self.payment_signals
-                    .set(&index, converted_masked_payment_code);
-                payment_code_signals_map.push(index);
-                self.payment_signals_index.set(index + 1);
-            } else {
-                ContractEnv::revert(Error::IncorrectPaymentSignalLength);
+                let index = self.payment_signals_index.get_or_default();
+
+                if let Ok(converted_masked_payment_code) = bs58::decode(&masked_payment_code)
+                    .with_alphabet(bs58::Alphabet::BITCOIN)
+                    .into_vec()
+                {
+                    self.payment_signals
+                        .set(&index, converted_masked_payment_code);
+
+                    payment_code_signals_vec.push(index);
+                    self.payment_signals_mapping
+                        .set(&converted_recipient_payment_code, payment_code_signals_vec);
+
+                    self.payment_signals_index.set(index + 1);
+                } else {
+                    ContractEnv::revert(Error::IncorrectPaymentSignalLength);
+                }
             }
         } else {
             ContractEnv::revert(Error::IncorrectPaymentCodeLength);
@@ -212,6 +238,67 @@ impl MasterPaymentCode {
 //         assert_events!(
 //             ali_contract,
 //             PersonalPaymentCodeSignallingPost { signal: bob_signal.clone() }
+//         );
+
+//         // Checks
+//         assert_eq!(ali_contract.get_payment_signal(0), Some(bob_signal));
+//         assert_eq!(ali_contract.get_payment_signal(1), None);
+//         assert_eq!(bob_contract.get_payment_signal(0), Some(ali_signal));
+//         assert_eq!(bob_contract.get_payment_signal(1), None);
+//     }
+// }
+
+// #[cfg(test)]
+// mod tests {
+//     use odra::{assert_events, TestEnv};
+
+//     use super::{Error, MasterPaymentCode};
+
+//     #[test]
+//     fn test_simple_scenario() {
+//         let (ali, bob) = (TestEnv::get_account(0), TestEnv::get_account(1));
+
+//         let master_contract = MasterPaymentCode::deploy();
+
+//         // Register Ali contract.
+//         let ali_key = String::from("ali");
+//         let ali_code = String::from("aaaaaaaa");
+//         let ali_signal = String::from("aaaaaaaaaaaaaa");
+
+//         let bob_key = String::from("bob");
+//         let bob_code = String::from("bbbbbbbbbbb");
+//         let bob_signal = String::from("bbbbbbbbffffff");
+
+//         let rado_key = String::from("bob");
+//         let rado_code = String::from("rrrrrrrrrr");
+//         let rado_signal = String::from("rrrrrrrrrrffffff");
+//         master_contract.set_user(ali_key.clone(), ali_code.clone());
+//         master_contract.set_signal(ali_code.clone(), bob_signal.clone());
+
+//         // Ali queries for Bob's address.
+//         let bob_address = master_contract.get_address_from_name(bob_key).unwrap();
+
+//         // Bob do the same.
+//         let ali_address = master_contract.get_address_from_name(ali_key).unwrap();
+
+//         // Ali sends signal to Bob.
+//         TestEnv::set_caller(&ali);
+//         PersonalPaymentCodeSignallingRef::at(bob_address).post(ali_signal.clone());
+//         assert_events!(
+//             bob_contract,
+//             PersonalPaymentCodeSignallingPost {
+//                 signal: ali_signal.clone()
+//             }
+//         );
+
+//         // Bob do the same.
+//         TestEnv::set_caller(&bob);
+//         PersonalPaymentCodeSignallingRef::at(ali_address).post(bob_signal.clone());
+//         assert_events!(
+//             ali_contract,
+//             PersonalPaymentCodeSignallingPost {
+//                 signal: bob_signal.clone()
+//             }
 //         );
 
 //         // Checks
