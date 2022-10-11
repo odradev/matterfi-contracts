@@ -1,4 +1,4 @@
-use odra::{execution_error, types::event::Event, ContractEnv, Event, Mapping, Variable};
+use odra::{execution_error, ContractEnv, Event, Mapping, Variable};
 
 type PaymentCode = Vec<u8>; //Bytes
 /// PaymentSignal is an encrypted PaymentCode
